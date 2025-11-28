@@ -1,6 +1,6 @@
 # WebView App Generator
 
-Multi-service FastAPI application that generates Android WebView app bundles (APK/AAB) for user-supplied URLs. Includes authentication, role-based authorization, keystore approvals, and a background builder that simulates Android builds.
+Multi-service FastAPI application that generates Android WebView app bundles (APK/AAB) for user-supplied URLs. Includes authentication, role-based authorization, keystore approvals, and a background builder that produces signed Gradle builds when the Android SDK is available.
 
 ## Features
 - **User authentication & roles**: JWT-based login/registration with `admin` and `user` roles.
@@ -12,7 +12,7 @@ Multi-service FastAPI application that generates Android WebView app bundles (AP
 
 ## Architecture
 - **webapp (FastAPI)**: Serves APIs and HTML pages, manages JWT auth, CRUD for app projects/keystores/builds. Uses SQLAlchemy ORM and Alembic migrations against MySQL. Static assets and templates live under `webapp/app/static` and `webapp/app/templates`.
-- **builder (worker)**: Polling worker that processes pending `BuildJob` records, simulates Android project scaffolding, writes dummy APK/AAB artifacts, and updates job logs/statuses.
+- **builder (worker)**: Polling worker that processes pending `BuildJob` records, scaffolds Android projects, invokes Gradle to build signed APK/AAB outputs, and updates job logs/statuses.
 - **database**: MySQL 8 instance shared by both services.
 - **Shared volumes**: `/data/keystores`, `/data/artifacts`, and `/data/icons` mounted to persist generated keystores, build outputs, and uploaded icons.
 
@@ -58,5 +58,5 @@ alembic upgrade head
 Ensure `DATABASE_URL` is set in the environment when running Alembic commands.
 
 ## Development notes
-- The builder currently **simulates** Android project generation and signing; replace the TODOs with real Gradle/Android SDK commands when wiring to actual build tooling.
+- The builder now generates Gradle projects with WebView activities and executes `gradle wrapper && ./gradlew assembleRelease bundleRelease` using the Android SDK; ensure `ANDROID_SDK_ROOT` is mounted and populated (see docker-compose volumes) for successful builds.
 - Keystore generation is stubbed and stores passwords in plain text pending integration with secure storage/encryption.

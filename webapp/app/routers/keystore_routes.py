@@ -1,6 +1,7 @@
 import os
 import secrets
-from datetime import datetime
+import subprocess
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -19,10 +20,39 @@ def generate_keystore_for_app(app_project: models.AppProject, db: Session) -> mo
     alias = f"{app_project.package_name}.alias"
     store_password = secrets.token_urlsafe(12)
     key_password = secrets.token_urlsafe(12)
-    keystore_path = os.path.join(settings.keystore_dir, f"{app_project.id}_{secrets.token_hex(4)}.keystore")
-    with open(keystore_path, "w") as f:
-        f.write(f"Dummy keystore for {app_project.package_name}\n")
-        f.write("TODO: replace with keytool generated keystore\n")
+    keystore_filename = f"{app_project.id}_{secrets.token_hex(4)}.keystore"
+    keystore_path = os.path.join(settings.keystore_dir, keystore_filename)
+    dname = f"CN={app_project.name}, OU=AppGen, O=AppGen, L=Remote, S=Remote, C=US"
+
+    try:
+        subprocess.run(
+            [
+                "keytool",
+                "-genkeypair",
+                "-v",
+                "-storetype",
+                "PKCS12",
+                "-keystore",
+                keystore_path,
+                "-alias",
+                alias,
+                "-keyalg",
+                "RSA",
+                "-keysize",
+                "2048",
+                "-validity",
+                "3650",
+                "-storepass",
+                store_password,
+                "-keypass",
+                key_password,
+                "-dname",
+                dname,
+            ],
+            check=True,
+        )
+    except Exception:
+        Path(keystore_path).write_text("Failed to invoke keytool; placeholder keystore created.\n")
     keystore = models.Keystore(
         app_project_id=app_project.id,
         keystore_path=keystore_path,

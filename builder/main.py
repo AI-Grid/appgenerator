@@ -1,7 +1,11 @@
 import os
+import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
+import textwrap
 
 from sqlalchemy.orm import Session
 
@@ -14,46 +18,236 @@ from builder.database import SessionLocal
 settings = get_settings()
 
 
-def simulate_build(db: Session, job: models.BuildJob):
+def write_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+
+
+def create_android_project(base_dir: Path, app_project: models.AppProject, keystore: models.Keystore, log_lines: list[str]) -> None:
+    package_path = Path("app/src/main/java") / Path(app_project.package_name.replace(".", "/"))
+    manifest = textwrap.dedent(
+        f"""
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{app_project.package_name}">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <application
+                android:label="{app_project.name}"
+                android:allowBackup="true"
+                android:icon="@android:drawable/sym_def_app_icon"
+                android:supportsRtl="true">
+                <activity
+                    android:name=".MainActivity"
+                    android:exported="true"
+                    android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+        """
+    ).strip()
+    write_file(base_dir / "app/src/main/AndroidManifest.xml", manifest)
+
+    main_activity = textwrap.dedent(
+        f"""
+        package {app_project.package_name}
+
+        import android.os.Bundle
+        import android.webkit.WebView
+        import android.webkit.WebViewClient
+        import androidx.appcompat.app.AppCompatActivity
+
+        class MainActivity : AppCompatActivity() {{
+            override fun onCreate(savedInstanceState: Bundle?) {{
+                super.onCreate(savedInstanceState)
+                val webView = WebView(this)
+                webView.settings.javaScriptEnabled = true
+                webView.webViewClient = WebViewClient()
+                webView.loadUrl("{app_project.url}")
+                setContentView(webView)
+            }}
+        }}
+        """
+    ).strip()
+    write_file(base_dir / package_path / "MainActivity.kt", main_activity)
+
+    strings = textwrap.dedent(
+        f"""
+        <resources>
+            <string name="app_name">{app_project.name}</string>
+        </resources>
+        """
+    ).strip()
+    write_file(base_dir / "app/src/main/res/values/strings.xml", strings)
+
+    styles = textwrap.dedent(
+        """
+        <resources>
+            <style name="Theme.AppCompat.Light.NoActionBar" parent="Theme.AppCompat.Light.NoActionBar" />
+        </resources>
+        """
+    ).strip()
+    write_file(base_dir / "app/src/main/res/values/themes.xml", styles)
+
+    colors = """<resources><color name=\"placeholder\">#6200EE</color></resources>"""
+    write_file(base_dir / "app/src/main/res/values/colors.xml", colors)
+
+    settings_gradle = textwrap.dedent(
+        f"""
+        rootProject.name = "webview-{app_project.id}"
+        include(":app")
+        """
+    ).strip()
+    write_file(base_dir / "settings.gradle", settings_gradle)
+
+    gradle_root = textwrap.dedent(
+        """
+        buildscript {
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:8.1.4'
+                classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10'
+            }
+        }
+
+        allprojects {
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+
+        task clean(type: Delete) {
+            delete rootProject.buildDir
+        }
+        """
+    ).strip()
+    write_file(base_dir / "build.gradle", gradle_root)
+
+    module_build = textwrap.dedent(
+        f"""
+        apply plugin: 'com.android.application'
+        apply plugin: 'org.jetbrains.kotlin.android'
+
+        android {{
+            namespace "{app_project.package_name}"
+            compileSdkVersion {app_project.target_sdk}
+
+            defaultConfig {{
+                applicationId "{app_project.package_name}"
+                minSdkVersion {app_project.min_sdk}
+                targetSdkVersion {app_project.target_sdk}
+                versionCode {app_project.version_code}
+                versionName "{app_project.version_name}"
+            }}
+
+            signingConfigs {{
+                release {{
+                    storeFile file('{keystore.keystore_path}')
+                    storePassword '{keystore.store_password}'
+                    keyAlias '{keystore.alias}'
+                    keyPassword '{keystore.key_password}'
+                }}
+            }}
+
+            buildTypes {{
+                debug {{
+                    signingConfig signingConfigs.release
+                }}
+                release {{
+                    signingConfig signingConfigs.release
+                    minifyEnabled false
+                    shrinkResources false
+                }}
+            }}
+        }}
+
+        dependencies {{
+            implementation 'androidx.core:core-ktx:1.12.0'
+            implementation 'androidx.appcompat:appcompat:1.6.1'
+            implementation 'androidx.activity:activity-ktx:1.8.2'
+            implementation 'androidx.webkit:webkit:1.9.0'
+        }}
+        """
+    ).strip()
+    write_file(base_dir / "app/build.gradle", module_build)
+
+    gradle_props = textwrap.dedent(
+        """
+        android.useAndroidX=true
+        android.enableJetifier=true
+        org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+        """
+    ).strip()
+    write_file(base_dir / "gradle.properties", gradle_props)
+
+    local_props = textwrap.dedent(
+        f"""
+        sdk.dir={settings.android_sdk_root}
+        """
+    ).strip()
+    write_file(base_dir / "local.properties", local_props)
+
+    log_lines.append(f"Gradle project generated in {base_dir}")
+
+
+def run_gradle_build(base_dir: Path, log_lines: list[str]) -> None:
+    env = os.environ.copy()
+    env.setdefault("ANDROID_SDK_ROOT", settings.android_sdk_root)
+    commands = [
+        ["gradle", "wrapper"],
+        ["./gradlew", "assembleRelease", "bundleRelease", "-x", "lint"],
+    ]
+    for cmd in commands:
+        proc = subprocess.run(
+            cmd,
+            cwd=base_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        log_lines.append(proc.stdout)
+        if proc.returncode != 0:
+            log_lines.append(proc.stderr)
+            raise RuntimeError(f"Command {' '.join(cmd)} failed with code {proc.returncode}")
+
+
+def collect_artifacts(base_dir: Path, job: models.BuildJob, log_lines: list[str]) -> tuple[str, str]:
+    apk_src = base_dir / "app/build/outputs/apk/release/app-release.apk"
+    aab_src = base_dir / "app/build/outputs/bundle/release/app-release.aab"
+    artifacts_dir = Path(settings.artifact_dir) / str(job.app_project_id) / str(job.id)
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    if not apk_src.exists() or not aab_src.exists():
+        raise FileNotFoundError("Expected Gradle outputs were not produced")
+    apk_dest = artifacts_dir / "app.apk"
+    aab_dest = artifacts_dir / "app.aab"
+    shutil.copy(apk_src, apk_dest)
+    shutil.copy(aab_src, aab_dest)
+    log_lines.append(f"Artifacts stored to {artifacts_dir}")
+    return str(apk_dest), str(aab_dest)
+
+
+def process_build(db: Session, job: models.BuildJob):
+    log_lines: list[str] = []
     job.status = models.BuildStatus.running.value
     db.commit()
     db.refresh(job)
 
     app_project = db.get(models.AppProject, job.app_project_id)
+    if not app_project:
+        raise RuntimeError("Associated AppProject not found")
     keystore = app_project.keystore
-    log_lines = []
-    base_dir = f"/data/builds/{job.id}"
-    os.makedirs(base_dir, exist_ok=True)
+    base_dir = Path(settings.build_work_dir) / str(job.id)
+    base_dir.mkdir(parents=True, exist_ok=True)
     log_lines.append(f"Working directory: {base_dir}")
-    os.makedirs(settings.artifact_dir, exist_ok=True)
 
-    manifest_path = os.path.join(base_dir, "AndroidManifest.xml")
-    with open(manifest_path, "w") as f:
-        f.write("<!-- TODO: real manifest -->\n")
-        f.write(f"<!-- Package: {app_project.package_name} URL: {app_project.url} -->\n")
-    log_lines.append("Generated AndroidManifest.xml")
-
-    main_activity = os.path.join(base_dir, "MainActivity.kt")
-    with open(main_activity, "w") as f:
-        f.write("// TODO: real WebView activity\n")
-        f.write(f"// Loads {app_project.url}\n")
-    log_lines.append("Generated MainActivity.kt")
-
-    artifacts_dir = os.path.join(settings.artifact_dir, str(app_project.id), str(job.id))
-    os.makedirs(artifacts_dir, exist_ok=True)
-    apk_path = os.path.join(artifacts_dir, "app.apk")
-    aab_path = os.path.join(artifacts_dir, "app.aab")
-    with open(apk_path, "w") as f:
-        f.write(f"Dummy APK for build {job.id}\n")
-        f.write("TODO: replace with Gradle output\n")
-    with open(aab_path, "w") as f:
-        f.write(f"Dummy AAB for build {job.id}\n")
-        f.write("TODO: replace with Gradle bundle\n")
-    log_lines.append("Simulated APK/AAB artifacts created")
-
-    log_lines.append(
-        f"Signing would use keystore {keystore.keystore_path} with alias {keystore.alias}"
-    )
+    create_android_project(base_dir, app_project, keystore, log_lines)
+    run_gradle_build(base_dir, log_lines)
+    apk_path, aab_path = collect_artifacts(base_dir, job, log_lines)
 
     job.status = models.BuildStatus.success.value
     job.apk_path = apk_path
@@ -76,7 +270,7 @@ def main():
                 time.sleep(5)
                 continue
             try:
-                simulate_build(db, job)
+                process_build(db, job)
             except Exception as exc:  # noqa: BLE001
                 job.status = models.BuildStatus.failed.value
                 job.log = str(exc)

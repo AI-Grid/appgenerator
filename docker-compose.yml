@@ -42,9 +42,13 @@ services:
       DATABASE_URL: mysql+pymysql://appuser:apppassword@mysql:3306/appdb
       KEYSTORE_DIR: /data/keystores
       ARTIFACT_DIR: /data/artifacts
+      BUILD_WORK_DIR: /data/builds
+      ANDROID_SDK_ROOT: /opt/android-sdk
     volumes:
       - ./data/keystores:/data/keystores
       - ./data/artifacts:/data/artifacts
+      - ./data/builds:/data/builds
+      - ./data/android-sdk:/opt/android-sdk
 
 volumes:
   mysql_data:
