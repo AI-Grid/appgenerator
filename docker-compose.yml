@@ -43,14 +43,10 @@ services:
       KEYSTORE_DIR: /data/keystores
       ARTIFACT_DIR: /data/artifacts
       BUILD_WORK_DIR: /data/builds
-      ANDROID_SDK_ROOT: /opt/android-sdk
-      GRADLE_HOME: /opt/gradle
     volumes:
       - ./data/keystores:/data/keystores
       - ./data/artifacts:/data/artifacts
       - ./data/builds:/data/builds
-      - ./data/android-sdk:/opt/android-sdk
-      - ./data/gradle:/opt/gradle
 
 volumes:
   mysql_data:

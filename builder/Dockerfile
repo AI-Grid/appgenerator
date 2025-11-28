@@ -5,8 +5,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openjdk-17-jdk-headless wget unzip ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ENV ANDROID_SDK_ROOT=/opt/android-sdk
-
 WORKDIR /app
 COPY builder/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
