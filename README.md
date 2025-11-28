@@ -1,12 +1,12 @@
 # WebView App Generator
 
-Multi-service FastAPI application that generates Android WebView app bundles (APK/AAB) for user-supplied URLs. Includes authentication, role-based authorization, keystore approvals, and a background builder that produces signed Gradle builds when the Android SDK is available.
+Multi-service FastAPI application that generates Android WebView app bundles (APK/AAB) for user-supplied URLs. Includes authentication, role-based authorization, keystore approvals, and a background builder that auto-bootstraps the Android toolchain to produce signed Gradle builds.
 
 ## Features
 - **User authentication & roles**: JWT-based login/registration with `admin` and `user` roles.
 - **App projects**: Create, list, view, update, and upload icons for WebView-based Android apps (package name, URL, SDK targets, versioning).
 - **Keystore lifecycle**: Per-project keystore generation with admin-gated download approvals and secure file serving when allowed.
-- **Build jobs**: Trigger build jobs per app, monitor status/logs, and download simulated APK/AAB artifacts after success.
+- **Build jobs**: Trigger build jobs per app, monitor status/logs, and download signed APK/AAB artifacts after success.
 - **Admin workflows**: Approve or reject keystore download requests via dedicated admin endpoints and pages.
 - **Web UI**: Basic Jinja2 templates for login, registration, dashboard, app detail, and admin keystore request review.
 
@@ -49,6 +49,8 @@ Environment variables used in `docker-compose.yml` (override as needed):
 - `DATABASE_URL`: MySQL connection string for SQLAlchemy.
 - `JWT_SECRET`, `JWT_ALGORITHM`: JWT signing configuration for the webapp.
 - `KEYSTORE_DIR`, `ARTIFACT_DIR`, `ICON_DIR`: Mounted storage paths for keystores, build artifacts, and uploaded icons.
+- `ANDROID_SDK_ROOT`, `ANDROID_CMDLINE_URL`, `ANDROID_PACKAGES`: Builder toolchain bootstrap controls; SDK downloads into the mounted SDK directory if missing.
+- `GRADLE_VERSION`, `GRADLE_HOME`: Version and installation root for the portable Gradle distribution the builder downloads automatically.
 
 ## Database migrations
 Alembic is configured at the repository root. The webapp container runs with SQLAlchemy models creating tables on startup; you can run migrations locally with:
@@ -58,5 +60,6 @@ alembic upgrade head
 Ensure `DATABASE_URL` is set in the environment when running Alembic commands.
 
 ## Development notes
-- The builder now generates Gradle projects with WebView activities and executes `gradle wrapper && ./gradlew assembleRelease bundleRelease` using the Android SDK; ensure `ANDROID_SDK_ROOT` is mounted and populated (see docker-compose volumes) for successful builds.
+- The builder bootstraps the Android command-line tools and required SDK packages into the shared `ANDROID_SDK_ROOT` volume at runtime (downloading commandline-tools zip and running `sdkmanager` for `platform-tools`, `platforms;android-34`, and `build-tools;34.0.0`).
+- A portable Gradle distribution is downloaded to `GRADLE_HOME` (default `/opt/gradle`) and used for `gradle wrapper` and subsequent `./gradlew assembleRelease bundleRelease` invocations; the installation persists across runs thanks to the mounted volume.
 - Keystore generation is stubbed and stores passwords in plain text pending integration with secure storage/encryption.

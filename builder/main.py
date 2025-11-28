@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 import textwrap
@@ -21,6 +22,54 @@ settings = get_settings()
 def write_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
+
+
+def ensure_commandline_tools() -> None:
+    target = Path(settings.android_sdk_root) / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+    if target.exists():
+        return
+    download_to = Path("/tmp/cmdline-tools.zip")
+    download_to.parent.mkdir(parents=True, exist_ok=True)
+    urllib.request.urlretrieve(settings.android_cmdline_url, download_to)
+    extract_base = Path(settings.android_sdk_root) / "cmdline-tools"
+    extract_base.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["unzip", "-qo", str(download_to), "-d", str(extract_base)], check=True)
+    extracted = extract_base / "cmdline-tools"
+    if extracted.exists():
+        (extract_base / "latest").mkdir(parents=True, exist_ok=True)
+        for item in extracted.iterdir():
+            shutil.move(str(item), str(extract_base / "latest" / item.name))
+        extracted.rmdir()
+    download_to.unlink(missing_ok=True)
+
+
+def ensure_android_packages() -> None:
+    ensure_commandline_tools()
+    sdkmanager = Path(settings.android_sdk_root) / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+    cmd = [str(sdkmanager), f"--sdk_root={settings.android_sdk_root}"] + settings.android_packages
+    subprocess.run(cmd, input=b"y\n" * 10, check=True)
+
+
+def ensure_gradle() -> str:
+    gradle_base = Path(settings.gradle_home)
+    gradle_dir = gradle_base / f"gradle-{settings.gradle_version}"
+    gradle_bin = gradle_dir / "bin" / "gradle"
+    if gradle_bin.exists():
+        return str(gradle_bin)
+    gradle_base.mkdir(parents=True, exist_ok=True)
+    download_url = f"https://services.gradle.org/distributions/gradle-{settings.gradle_version}-bin.zip"
+    archive = Path("/tmp/gradle.zip")
+    urllib.request.urlretrieve(download_url, archive)
+    subprocess.run(["unzip", "-qo", str(archive), "-d", str(gradle_base)], check=True)
+    archive.unlink(missing_ok=True)
+    return str(gradle_bin)
+
+
+def bootstrap_toolchain() -> None:
+    print("Ensuring Gradle distribution...")
+    ensure_gradle()
+    print("Ensuring Android SDK command-line tools and packages...")
+    ensure_android_packages()
 
 
 def create_android_project(base_dir: Path, app_project: models.AppProject, keystore: models.Keystore, log_lines: list[str]) -> None:
@@ -196,10 +245,12 @@ def create_android_project(base_dir: Path, app_project: models.AppProject, keyst
 
 
 def run_gradle_build(base_dir: Path, log_lines: list[str]) -> None:
+    gradle_bin = ensure_gradle()
     env = os.environ.copy()
     env.setdefault("ANDROID_SDK_ROOT", settings.android_sdk_root)
+    env["PATH"] = f"{Path(gradle_bin).parent}:{env.get('PATH', '')}"
     commands = [
-        ["gradle", "wrapper"],
+        [gradle_bin, "wrapper"],
         ["./gradlew", "assembleRelease", "bundleRelease", "-x", "lint"],
     ]
     for cmd in commands:
@@ -258,6 +309,7 @@ def process_build(db: Session, job: models.BuildJob):
 
 
 def main():
+    bootstrap_toolchain()
     while True:
         with SessionLocal() as db:
             job = (
