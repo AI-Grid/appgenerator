@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+    <title>WebView Generator</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+    <h1>WebView Generator</h1>
+    <nav>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/auth/login">Login</a>
+        <a href="/auth/register">Register</a>
+        <a href="/admin/keystore-requests/view">Admin Requests</a>
+    </nav>
+</header>
+<main>
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>
