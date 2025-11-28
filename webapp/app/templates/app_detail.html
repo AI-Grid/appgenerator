@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ app.name }}</h2>
+<p>Package: {{ app.package_name }}</p>
+<p>URL: {{ app.url }}</p>
+<p>SDK: min {{ app.min_sdk }} / target {{ app.target_sdk }}</p>
+<p>Version: {{ app.version_name }} ({{ app.version_code }})</p>
+{% if app.icon_path %}
+<img src="{{ app.icon_path }}" alt="icon" style="max-width:100px;">
+{% endif %}
+<section>
+    <h3>Keystore</h3>
+    {% if keystore %}
+    <p>Alias: {{ keystore.alias }}</p>
+    <p>Download allowed: {{ keystore.download_allowed }}</p>
+    {% else %}
+    <p>No keystore yet.</p>
+    {% endif %}
+    <form action="/apps/{{ app.id }}/keystore/request-download" method="post">
+        <button type="submit">Request Keystore Download</button>
+    </form>
+</section>
+<section>
+    <h3>Builds</h3>
+    <form action="/apps/{{ app.id }}/build" method="post">
+        <button type="submit">Trigger Build</button>
+    </form>
+    <table>
+        <tr><th>ID</th><th>Status</th><th>Created</th><th>Finished</th><th>Downloads</th></tr>
+        {% for b in builds %}
+        <tr>
+            <td>{{ b.id }}</td>
+            <td>{{ b.status }}</td>
+            <td>{{ b.created_at }}</td>
+            <td>{{ b.finished_at }}</td>
+            <td>
+                {% if b.apk_path %}<a href="/builds/{{ b.id }}/download/apk">APK</a>{% endif %}
+                {% if b.aab_path %}<a href="/builds/{{ b.id }}/download/aab">AAB</a>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</section>
+{% endblock %}
