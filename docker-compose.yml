@@ -1,0 +1,52 @@
+version: '3.9'
+services:
+  mysql:
+    image: mysql:8
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: appdb
+      MYSQL_USER: appuser
+      MYSQL_PASSWORD: apppassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  webapp:
+    build:
+      context: ./webapp
+    depends_on:
+      - mysql
+    environment:
+      DATABASE_URL: mysql+pymysql://appuser:apppassword@mysql:3306/appdb
+      JWT_SECRET: changeme
+      JWT_ALGORITHM: HS256
+      KEYSTORE_DIR: /data/keystores
+      ARTIFACT_DIR: /data/artifacts
+      ICON_DIR: /data/icons
+    volumes:
+      - ./data/keystores:/data/keystores
+      - ./data/artifacts:/data/artifacts
+      - ./data/icons:/data/icons
+    ports:
+      - "8000:8000"
+
+  builder:
+    build:
+      context: .
+      dockerfile: builder/Dockerfile
+    depends_on:
+      - mysql
+    environment:
+      DATABASE_URL: mysql+pymysql://appuser:apppassword@mysql:3306/appdb
+      KEYSTORE_DIR: /data/keystores
+      ARTIFACT_DIR: /data/artifacts
+      BUILD_WORK_DIR: /data/builds
+    volumes:
+      - ./data/keystores:/data/keystores
+      - ./data/artifacts:/data/artifacts
+      - ./data/builds:/data/builds
+
+volumes:
+  mysql_data:
